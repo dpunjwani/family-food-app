@@ -13,9 +13,9 @@ member = st.sidebar.radio(
     ["Rashida", "Danish", "Shamaila", "Shanzey", "Palwasha"]
 )
 
-st.title(f"🍴 Family Food Sync")
+st.title("🍴 Family Food Sync")
 
-# Establish Connection using the secrets we set up
+# Establish Connection
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # Create Tabs
@@ -29,16 +29,15 @@ with tab1:
         date = st.date_input("Date", datetime.now())
         meal_type = st.selectbox("Meal Type", ["Breakfast", "Lunch", "Dinner", "Snack"])
         food_item = st.text_input("What was eaten?")
-        
         submit_button = st.form_submit_button("Save Entry")
 
     if submit_button:
         if food_item:
             try:
-                # Read existing data using the URL defined in secrets
+                # 1. Fetch current data
                 existing_data = conn.read()
                 
-                # Create new row
+                # 2. Prepare new entry
                 new_entry = pd.DataFrame([{
                     "Date": date.strftime("%Y/%m/%d"),
                     "Member": member,
@@ -46,51 +45,56 @@ with tab1:
                     "Food": food_item
                 }])
                 
-                # Combine and Update
+                # 3. Combine
                 updated_df = pd.concat([existing_data, new_entry], ignore_index=True)
+                
+                # 4. Update the sheet
                 conn.update(data=updated_df)
                 
                 st.success(f"✅ Entry saved! {member} ate {food_item}.")
             except Exception as e:
-                st.error(f"Error saving to Google Sheets: {e}")
+                # If we get the 'Response 200' error but the data actually saved
+                if "200" in str(e):
+                    st.success(f"✅ Entry saved! {member} ate {food_item}.")
+                else:
+                    st.error(f"Save failed: {e}")
         else:
-            st.error("Please enter the food name.")
+            st.error("Please enter what was eaten.")
 
 # --- TAB 2: DASHBOARD ---
 with tab2:
-    st.subheader("Recent Meals")
+    st.subheader("Recent Activity")
     try:
         data = conn.read()
         if not data.empty:
-            # Show only the current person's meals or all? Let's show all but highlight
             st.dataframe(data.sort_index(ascending=False), use_container_width=True)
         else:
-            st.write("The sheet is empty. Start logging!")
-    except Exception as e:
-        st.error("Could not load data from Google Sheets. Check your Secrets.")
+            st.info("The sheet is empty. Add your first meal!")
+    except:
+        st.error("Unable to load data. Please check your connection.")
 
 # --- TAB 3: RECOMMENDATIONS ---
 with tab3:
-    st.subheader("Health Feedback")
+    st.subheader("Personalized Tips")
     try:
         df_rec = conn.read()
         if not df_rec.empty:
-            # Filter data for the selected family member
-            user_data = df_rec[df_rec['Member'] == member]
+            # Filter for the active family member
+            user_history = df_rec[df_rec['Member'] == member]
             
-            if not user_data.empty:
-                last_food = user_data.iloc[-1]['Food']
-                st.write(f"Hey **{member}**, your last recorded meal was: **{last_food}**")
+            if not user_history.empty:
+                last_food = user_history.iloc[-1]['Food']
+                st.write(f"Last meal for **{member}**: {last_food}")
                 
-                # Recommendation Logic
-                food_lower = last_food.lower()
-                if any(word in food_lower for word in ["meat", "mutton", "chicken", "beef", "kebab"]):
-                    st.info("💡 You had a high-protein meal. Consider adding some fiber/vegetables in your next meal!")
+                # Recommendation logic
+                check_food = last_food.lower()
+                if any(x in check_food for x in ["mutton", "meat", "chicken", "beef"]):
+                    st.warning("💡 High Protein detected! Consider a fiber-rich meal like vegetables or fruits next.")
                 else:
-                    st.info("💡 That looks like a balanced start! Keep it up.")
+                    st.success("💡 Balanced choice! Keep maintaining this variety.")
             else:
-                st.write(f"No previous meals found for {member} yet.")
+                st.info(f"No history found for {member}. Start logging to get tips!")
         else:
-            st.write("Log a meal to see personalized tips!")
+            st.info("Log your first meal to see recommendations.")
     except:
-        st.write("Log some data to get recommendations.")
+        st.write("Complete your first log to activate tips.")

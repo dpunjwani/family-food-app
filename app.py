@@ -1,29 +1,29 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import datetime
 
 # --- APP CONFIG ---
 st.set_page_config(page_title="Family Food Sync", layout="wide")
 
-# --- CONNECT TO GOOGLE SHEETS ---
-# PASTE YOUR GOOGLE SHEET LINK HERE BETWEEN THE QUOTES
-SHEET_URL = "https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID_HERE/edit#gid=0"
-CSV_URL = SHEET_URL.replace("/edit#gid=", "/export?format=csv&gid=")
+# --- GOOGLE SHEET SETUP ---
+# Your specific link integrated
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1E26HheF-2lr22MMkWQSB5CG8qlJ1D0r2OVyJptrpcbQ/edit?usp=sharing"
 
-# --- DATA LOADING ---
-def load_data():
-    try:
-        # This reads directly from your Google Sheet
-        return pd.read_csv(CSV_URL)
-    except:
-        return pd.DataFrame(columns=['Date', 'Member', 'Meal Type', 'Food'])
+# Create connection
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-if 'family' not in st.session_state:
-    st.session_state.family = ["Rashida", "Shamaila", "Shanzey", "Palwasha", "Danish Punjwani"]
+# Load data from the sheet
+try:
+    df = conn.read(spreadsheet=SHEET_URL, ttl="0")
+    df = df.dropna(how="all")
+except Exception:
+    df = pd.DataFrame(columns=['Date', 'Member', 'Meal Type', 'Food'])
 
-# --- SIDEBAR ---
+# --- SIDEBAR: PROFILES ---
 st.sidebar.title("👥 Family Profiles")
-selected_user = st.sidebar.radio("Who is logging?", st.session_state.family)
+family_list = ["Rashida", "Shamaila", "Shanzey", "Palwasha", "Danish Punjwani"]
+selected_user = st.sidebar.radio("Who is logging?", family_list)
 
 # --- MAIN UI ---
 st.title("🍽️ Family Food Sync")
@@ -37,27 +37,49 @@ with tab1:
         date = st.date_input("Date", datetime.date.today())
         meal_type = st.selectbox("Meal Type", ["Lunch", "Dinner"])
     with col2:
-        food_item = st.text_input("What was eaten?", placeholder="e.g., Daal Chawal")
+        food_item = st.text_input("What was eaten?", placeholder="e.g., Daal Chawal, Biryani")
     
     if st.button("Save Entry", use_container_width=True):
         if food_item:
-            # Instructions for the user since we can't write to sheets without complex keys
-            st.success(f"Entry for {food_item} prepared!")
-            st.info("To make this permanent, usually we connect a Private Key. For now, check your dashboard!")
-            # Temporary local update
-            new_row = pd.DataFrame([[date, selected_user, meal_type, food_item]], columns=['Date', 'Member', 'Meal Type', 'Food'])
-            st.session_state.logs = pd.concat([load_data(), new_row])
+            # Create the new row
+            new_row = pd.DataFrame([{
+                "Date": str(date),
+                "Member": selected_user,
+                "Meal Type": meal_type,
+                "Food": food_item
+            }])
+            
+            # Combine current sheet data with the new entry
+            updated_df = pd.concat([df, new_row], ignore_index=True)
+            
+            # Write back to Google Sheets
+            conn.update(spreadsheet=SHEET_URL, data=updated_df)
+            st.success(f"Entry saved! {selected_user} ate {food_item}.")
+            st.balloons()
+            st.info("Refresh the page in a moment to see it in the Dashboard.")
         else:
-            st.error("Please enter the food name.")
+            st.error("Please enter a food item before saving.")
 
 with tab2:
-    st.write("### Family History")
-    df = load_data()
+    st.write("### Family Eating History")
     if not df.empty:
+        # Show latest meals at the top
         st.dataframe(df.sort_values(by="Date", ascending=False), use_container_width=True)
     else:
-        st.info("Once you add data to your Google Sheet, it will appear here for everyone!")
+        st.info("The history is empty. Start logging meals to see them here!")
 
 with tab3:
     st.write("### Smart Recommendation")
-    st.info(f"Hi {selected_user}! Based on the family's recent meals, I recommend trying something with fresh vegetables tonight!")
+    user_data = df[df['Member'] == selected_user]
+    
+    if not user_data.empty:
+        last_meal = user_data.iloc[-1]['Food']
+        st.write(f"The last meal recorded for **{selected_user}** was **{last_meal}**.")
+        
+        # Simple Logic
+        if "chicken" in last_food.lower() or "meat" in last_food.lower():
+            st.success("💡 Recommendation: How about a light vegetarian dish like Sabzi or Daal today?")
+        else:
+            st.success("💡 Recommendation: Maybe try some protein like Grilled Fish or Chicken Karahi today!")
+    else:
+        st.write("Log at least one meal to get personalized suggestions!")

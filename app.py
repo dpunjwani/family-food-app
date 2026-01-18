@@ -35,7 +35,7 @@ with tab1:
         if food_item:
             try:
                 # 1. Fetch current data
-                existing_data = conn.read()
+                existing_data = conn.read(ttl=0)
                 
                 # 2. Prepare new entry
                 new_entry = pd.DataFrame([{
@@ -65,7 +65,7 @@ with tab1:
 with tab2:
     st.subheader("Recent Activity")
     try:
-        data = conn.read()
+        data = conn.read(ttl=0)
         if not data.empty:
             st.dataframe(data.sort_index(ascending=False), use_container_width=True)
         else:
@@ -77,7 +77,7 @@ with tab2:
 with tab3:
     st.subheader("Personalized Tips")
     try:
-        df_rec = conn.read()
+        df_rec = conn.read(ttl=0)
         if not df_rec.empty:
             # Filter for the active family member
             user_history = df_rec[df_rec['Member'] == member]
@@ -98,3 +98,4 @@ with tab3:
             st.info("Log your first meal to see recommendations.")
     except:
         st.write("Complete your first log to activate tips.")
+

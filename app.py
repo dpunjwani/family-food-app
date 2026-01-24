@@ -1,81 +1,100 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
+import plotly.express as px
 
-st.set_page_config(page_title="Family Food Sync", page_icon="🍴")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Family Food Sync", layout="wide")
 
-# --- SIDEBAR ---
-st.sidebar.title("👨‍👩‍👧‍👦 Family Members")
-member = st.sidebar.radio("Select who is recording:", ["Rashida", "Danish", "Shamaila", "Shanzey", "Palwasha"])
-
-st.title("🍴 Family Food Sync")
-
-# Connection setup - using the ID from your secrets
+# --- 1. CONNECTION SETUP ---
+# This looks for the [connections.gsheets] in your Streamlit Secrets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-tab1, tab2, tab3 = st.tabs(["📝 Log Meal", "📊 Dashboard", "💡 Recommendations"])
+# --- 2. DATA LOADING ---
+def load_data():
+    # ttl=0 ensures we don't show old cached data after saving
+    return conn.read(worksheet="Sheet1", ttl=0)
 
-# --- TAB 1: LOG MEAL ---
-with tab1:
-    st.subheader(f"Recording for: {member}")
+df = load_data()
+
+# --- 3. SIDEBAR NAVIGATION ---
+st.sidebar.title("🍴 Family Food App")
+page = st.sidebar.selectbox("Go to", ["Data Entry", "Dashboard", "Recommendations"])
+
+# --- PAGE 1: DATA ENTRY ---
+if page == "Data Entry":
+    st.header("📝 Log New Meal")
+    
     with st.form("entry_form", clear_on_submit=True):
-        date = st.date_input("Date", datetime.now())
-        meal_type = st.selectbox("Meal Type", ["Breakfast", "Lunch", "Dinner", "Snack"])
-        food_item = st.text_input("What was eaten?")
-        submit_button = st.form_submit_button("Save Entry")
-
-    if submit_button and food_item:
-        try:
-            # Prepare new entry
-            new_entry = pd.DataFrame([{
-                "Date": date.strftime("%Y-%m-%d"),
-                "Member": member,
-                "Meal Type": meal_type,
-                "Food": food_item
-            }])
-            
-            # Using 'create' instead of 'update' to avoid the Response 200 bug
-            conn.create(data=new_entry)
-            
-            st.success(f"✅ Entry saved! {member} ate {food_item}.")
-            # Force clear cache so Dashboard updates immediately
-            st.cache_data.clear()
-        except Exception as e:
-            # Silent fix for the Response 200 issue
-            if "200" in str(e):
-                st.success(f"✅ Entry saved! {member} ate {food_item}.")
-                st.cache_data.clear()
+        col1, col2 = st.columns(2)
+        with col1:
+            date = st.date_input("Date")
+            member = st.selectbox("Family Member", ["Rashida", "Danish", "Shamaila", "Shanzey", "Palwasha"])
+        with col2:
+            meal_type = st.selectbox("Meal Type", ["Breakfast", "Lunch", "Dinner", "Snack"])
+            food = st.text_input("What was eaten?")
+        
+        submit = st.form_submit_button("Save Entry")
+        
+        if submit:
+            if food:
+                # Create a new row
+                new_data = pd.DataFrame([{
+                    "Date": str(date),
+                    "Member": member,
+                    "Meal Type": meal_type,
+                    "Food": food
+                }])
+                
+                # Combine with existing data
+                updated_df = pd.concat([df, new_data], ignore_index=True)
+                
+                # Push back to Google Sheets
+                conn.update(worksheet="Sheet1", data=updated_df)
+                st.success(f"Successfully saved: {food} for {member}!")
+                st.balloons()
             else:
-                st.error(f"Error: {e}")
+                st.error("Please enter the food details before saving.")
 
-# --- TAB 2: DASHBOARD ---
-with tab2:
-    st.subheader("Recent Activity")
-    try:
-        # Fetch fresh data
-        df = conn.read(ttl=0)
-        if not df.empty:
-            st.dataframe(df.sort_index(ascending=False), use_container_width=True)
-        else:
-            st.info("The sheet appears empty. If you just added data, refresh in 5 seconds.")
-    except:
-        st.error("Cannot load Dashboard. Check if the Sheet ID in Secrets is correct.")
+# --- PAGE 2: DASHBOARD ---
+elif page == "Dashboard":
+    st.header("📊 Eating Habits Dashboard")
+    
+    if not df.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Entries by Member")
+            fig1 = px.pie(df, names="Member", hole=0.3)
+            st.plotly_chart(fig1)
+            
+        with col2:
+            st.subheader("Meal Type Distribution")
+            fig2 = px.bar(df, x="Meal Type", color="Member", barmode="group")
+            st.plotly_chart(fig2)
+            
+        st.subheader("Recent History")
+        st.dataframe(df.tail(10), use_container_width=True)
+    else:
+        st.warning("No data found in the Google Sheet yet.")
 
-# --- TAB 3: RECOMMENDATIONS ---
-with tab3:
-    st.subheader("Personalized Tips")
-    try:
-        df_rec = conn.read(ttl=0)
-        user_history = df_rec[df_rec['Member'] == member]
-        if not user_history.empty:
-            last_meal = user_history.iloc[-1]['Food']
-            st.write(f"Your last meal was: **{last_meal}**")
-            if any(x in last_meal.lower() for x in ["mutton", "meat", "chicken", "puri", "halwa"]):
-                st.warning("💡 That was a rich meal! Consider something lighter like fruit or yogurt next.")
-            else:
-                st.success("💡 Looking good! Keep up the variety.")
+# --- PAGE 3: RECOMMENDATIONS ---
+elif page == "Recommendations":
+    st.header("💡 Meal Recommendations")
+    
+    if not df.empty:
+        last_meal = df.iloc[-1]
+        st.info(f"The last meal logged was **{last_meal['Food']}** by **{last_meal['Member']}**.")
+        
+        # Simple Logic: Suggest something different from the last meal type
+        if last_meal['Meal Type'] == 'Breakfast':
+            st.write("### Suggestion for Lunch:")
+            st.success("How about a fresh salad or a chicken sandwich?")
+        elif last_meal['Meal Type'] == 'Lunch':
+            st.write("### Suggestion for Dinner:")
+            st.success("Consider a light pasta dish or grilled vegetables.")
         else:
-            st.info("Log a meal to see your tips.")
-    except:
-        st.write("Tips will appear here after your first log.")
+            st.write("### Suggestion for Tomorrow:")
+            st.success("How about starting the day with some fruits and oats?")
+    else:
+        st.warning("Log some meals first to get recommendations!")
